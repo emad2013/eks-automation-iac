@@ -20,7 +20,7 @@ data "aws_availability_zones" "azs" {}
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 6.6.0"
-
+  
   name = var.name
   cidr = var.vpc_cidr_block
 
@@ -36,6 +36,7 @@ module "vpc" {
   }
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb" = 1
+    "karpenter.sh/discovery" = var.name   # ← ADD THIS
   }
 
   tags = var.tags
@@ -105,7 +106,7 @@ module "eks" {
       instance_types = ["t3.medium"]
       min_size       = 1
       max_size       = 2
-      desired_size   = 1
+      desired_size   = 2
     }
   }
 
@@ -145,6 +146,16 @@ module "eks_blueprints_addons" {
 
   tags = var.tags
 }
+resource "null_resource" "wait_for_lbc" {
+  provisioner "local-exec" {
+    command     = <<-EOT
+      aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${var.aws_region}
+      kubectl rollout status deployment/aws-load-balancer-controller -n kube-system --timeout=300s
+    EOT
+    interpreter = ["bash", "-c"]
+  }
+  depends_on = [module.eks_blueprints_addons]
+}
 
 provider "flux" {
   kubernetes = {
@@ -166,7 +177,9 @@ provider "flux" {
 }
 
 resource "flux_bootstrap_git" "this" {
-  path       = "clusters/${var.name}"
+  path       = "clusters/dev/${var.name}"
   embedded_manifests = true
-  depends_on = [module.eks_blueprints_addons]
+  depends_on = [null_resource.wait_for_lbc]
+  components_extra = ["image-reflector-controller", "image-automation-controller"] 
+  
 }
