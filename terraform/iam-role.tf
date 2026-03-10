@@ -26,6 +26,53 @@ resource "aws_iam_role" "external-admin" {
   })
 }
 
+# Karpenter Controller — extra IAM permissions
+# ──────────────────────────────────────────────
+# eks_blueprints_addons creates the Karpenter controller role automatically,
+# but it does NOT attach iam:PassRole or instance profile permissions.
+# Without these, EC2NodeClass reconciliation fails with AccessDenied (403).
+
+data "aws_iam_role" "karpenter_controller" {
+  name       = "karpenter-${module.eks.cluster_name}"
+  depends_on = [module.eks_blueprints_addons_karpenter]
+}
+
+resource "aws_iam_role_policy" "karpenter_pass_role" {
+  name = "karpenter-pass-role"
+  role = data.aws_iam_role.karpenter_controller.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        # Required for EC2NodeClass to attach the node role to instance profiles
+        Sid    = "KarpenterPassRole"
+        Effect = "Allow"
+        Action = ["iam:PassRole"]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/KarpenterNodeRole-${module.eks.cluster_name}"
+      },
+      {
+        # Required for Karpenter to create/manage EC2 instance profiles
+        Sid    = "KarpenterInstanceProfile"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateInstanceProfile",
+          "iam:DeleteInstanceProfile",
+          "iam:GetInstanceProfile",
+          "iam:AddRoleToInstanceProfile",
+          "iam:RemoveRoleFromInstanceProfile",
+          "iam:TagInstanceProfile"
+        ]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/*"
+      }
+    ]
+  })
+}
+
+# Needed to resolve account ID for ARN construction
+data "aws_caller_identity" "current" {}
+
+
 resource "aws_iam_role_policy" "external-admin-policy" {
   name = "external-admin-policy"
   role = aws_iam_role.external-admin.id

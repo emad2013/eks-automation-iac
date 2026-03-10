@@ -4,19 +4,17 @@ provider "kubernetes" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    # Added --region flag — fixes "aws failed with exit code 2" on Windows
     args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
   }
 }
 
-# All resources use _v1 suffix — fixes "Deprecated Resource" warnings
 resource "kubernetes_namespace_v1" "online-boutique" {
   metadata {
     name = "online-boutique"
   }
 
-  # Must wait for node group and addons to be ready before creating k8s resources
-  depends_on = [module.eks_blueprints_addons]
+  # Wait for ALL addons (including Karpenter) to be ready
+  depends_on = [module.eks_blueprints_addons_karpenter]
 }
 
 resource "kubernetes_role_v1" "namespace-viewer" {
@@ -72,7 +70,7 @@ resource "kubernetes_cluster_role_v1" "cluster_viewer" {
     verbs      = ["get", "list", "watch"]
   }
 
-  depends_on = [module.eks_blueprints_addons]
+  depends_on = [module.eks_blueprints_addons_karpenter]
 }
 
 resource "kubernetes_cluster_role_binding_v1" "cluster_viewer" {
