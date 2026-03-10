@@ -2,6 +2,11 @@ provider "aws" {
   region = var.aws_region
 }
 
+provider "aws" {
+  alias  = "virginia"
+  region = "us-east-1"
+}
+
 provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
@@ -15,6 +20,10 @@ provider "helm" {
 }
 
 data "aws_availability_zones" "azs" {}
+
+data "aws_ecrpublic_authorization_token" "token" {
+  provider = aws.virginia
+}
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
@@ -101,11 +110,8 @@ module "eks" {
   tags = var.tags
 }
 
-# ── Stage 1: Install AWS LBC + metrics-server ONLY ───────────────────────────
-# Karpenter is intentionally excluded here — it must wait until the LBC
-# webhook is fully healthy, otherwise Service creation is intercepted by a
-# webhook with no backing pod and the apply fails.
-module "eks_blueprints_addons_lbc" {
+# Stage 1: LBC + metrics-server only
+module "eks_blueprints_addons" {
   source  = "aws-ia/eks-blueprints-addons/aws"
   version = "~> 1.0"
 
@@ -116,7 +122,7 @@ module "eks_blueprints_addons_lbc" {
 
   enable_aws_load_balancer_controller = true
   enable_metrics_server               = true
-  enable_karpenter                    = false   # ← installed separately below
+  enable_karpenter                    = false
 
   aws_load_balancer_controller = {
     set = [
@@ -132,29 +138,22 @@ module "eks_blueprints_addons_lbc" {
   }
 
   depends_on = [module.eks]
-
-  tags = var.tags
+  tags       = var.tags
 }
 
-# ── Stage 2: Wait for LBC webhook to become ready ────────────────────────────
-# The mutating webhook "mservice.elbv2.k8s.aws" is only healthy once the
-# aws-load-balancer-controller Deployment has at least one Ready pod.
-# Without this gate, Karpenter's Helm chart creates a Service that hits the
-# webhook before it has endpoints → "no endpoints available" error.
+# Stage 2: Wait for LBC webhook to be ready
 resource "null_resource" "wait_for_lbc" {
   provisioner "local-exec" {
-    command = <<-EOT
+    command     = <<-EOT
       aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${var.aws_region}
-      kubectl rollout status deployment/aws-load-balancer-controller \
-        -n kube-system --timeout=300s
+      kubectl rollout status deployment/aws-load-balancer-controller -n kube-system --timeout=300s
     EOT
     interpreter = ["bash", "-c"]
   }
-
-  depends_on = [module.eks_blueprints_addons_lbc]
+  depends_on = [module.eks_blueprints_addons]
 }
 
-# ── Stage 3: Install Karpenter AFTER webhook is healthy ──────────────────────
+# Stage 3: Karpenter after LBC webhook is healthy
 module "eks_blueprints_addons_karpenter" {
   source  = "aws-ia/eks-blueprints-addons/aws"
   version = "~> 1.0"
@@ -164,16 +163,29 @@ module "eks_blueprints_addons_karpenter" {
   cluster_version   = module.eks.cluster_version
   oidc_provider_arn = module.eks.oidc_provider_arn
 
-  enable_aws_load_balancer_controller = false
-  enable_metrics_server               = false
-  enable_karpenter                    = true
+  enable_aws_load_balancer_controller        = false
+  enable_metrics_server                      = false
+  enable_karpenter                           = true
+  karpenter_enable_spot_termination          = true
+  karpenter_enable_instance_profile_creation = true
 
-  depends_on = [null_resource.wait_for_lbc]   # ← guaranteed LBC webhook is up
+  karpenter = {
+    repository_username = data.aws_ecrpublic_authorization_token.token.user_name
+    repository_password = data.aws_ecrpublic_authorization_token.token.password
+    chart_version       = "0.37.0"
+  }
 
-  tags = var.tags
+  depends_on = [null_resource.wait_for_lbc]
+  tags       = var.tags
 }
 
-# ── Flux bootstrap ────────────────────────────────────────────────────────────
+resource "aws_eks_access_entry" "karpenter_nodes" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = module.eks_blueprints_addons_karpenter.karpenter.node_iam_role_arn
+  type          = "EC2_LINUX"
+  depends_on    = [module.eks_blueprints_addons_karpenter]
+}
+
 provider "flux" {
   kubernetes = {
     host                   = module.eks.cluster_endpoint
@@ -197,12 +209,5 @@ resource "flux_bootstrap_git" "this" {
   path               = "clusters/dev/${var.name}"
   embedded_manifests = true
   components_extra   = ["image-reflector-controller", "image-automation-controller"]
-
-  kustomization_override = <<-YAML
-    spec:
-      timeout: 10m
-      retryInterval: 2m
-  YAML
-
-  depends_on = [module.eks_blueprints_addons_karpenter]
+  depends_on         = [module.eks_blueprints_addons_karpenter]
 }

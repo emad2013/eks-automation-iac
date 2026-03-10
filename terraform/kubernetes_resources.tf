@@ -12,9 +12,7 @@ resource "kubernetes_namespace_v1" "online-boutique" {
   metadata {
     name = "online-boutique"
   }
-
-  # Wait for ALL addons (including Karpenter) to be ready
-  depends_on = [module.eks_blueprints_addons_karpenter]
+   
 }
 
 resource "kubernetes_role_v1" "namespace-viewer" {
@@ -69,8 +67,7 @@ resource "kubernetes_cluster_role_v1" "cluster_viewer" {
     resources  = ["*"]
     verbs      = ["get", "list", "watch"]
   }
-
-  depends_on = [module.eks_blueprints_addons_karpenter]
+ 
 }
 
 resource "kubernetes_cluster_role_binding_v1" "cluster_viewer" {
