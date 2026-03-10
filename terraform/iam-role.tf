@@ -37,22 +37,37 @@ data "aws_iam_role" "karpenter_controller" {
   depends_on = [module.eks_blueprints_addons_karpenter]
 }
 
+# iam-karpenter.tf
+
+# Fix: use aws_iam_roles (plural) with regex to find the actual role name
+# eks_blueprints_addons may name it differently depending on version
+data "aws_iam_roles" "karpenter" {
+  name_regex = ".*karpenter.*"
+  depends_on = [module.eks_blueprints_addons_karpenter]
+}
+
+locals {
+  # Filter to find the role scoped to this cluster
+  karpenter_role_name = [
+    for name in tolist(data.aws_iam_roles.karpenter.names) :
+    name if can(regex(module.eks.cluster_name, name))
+  ][0]
+}
+
 resource "aws_iam_role_policy" "karpenter_pass_role" {
   name = "karpenter-pass-role"
-  role = data.aws_iam_role.karpenter_controller.id
+  role = local.karpenter_role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        # Required for EC2NodeClass to attach the node role to instance profiles
-        Sid    = "KarpenterPassRole"
-        Effect = "Allow"
-        Action = ["iam:PassRole"]
+        Sid      = "KarpenterPassRole"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/KarpenterNodeRole-${module.eks.cluster_name}"
       },
       {
-        # Required for Karpenter to create/manage EC2 instance profiles
         Sid    = "KarpenterInstanceProfile"
         Effect = "Allow"
         Action = [
@@ -67,7 +82,11 @@ resource "aws_iam_role_policy" "karpenter_pass_role" {
       }
     ]
   })
+
+  depends_on = [module.eks_blueprints_addons_karpenter]
 }
+
+data "aws_caller_identity" "current" {}
 
 # Needed to resolve account ID for ARN construction
 data "aws_caller_identity" "current" {}

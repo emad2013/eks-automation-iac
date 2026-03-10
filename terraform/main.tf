@@ -198,5 +198,14 @@ resource "flux_bootstrap_git" "this" {
   embedded_manifests = true
   components_extra   = ["image-reflector-controller", "image-automation-controller"]
 
+  # Fix: give Flux more time to reconcile on first bootstrap
+  # Default is too short when Karpenter + monitoring are also starting
+  kustomization_override = {
+    spec = {
+      timeout      = "10m"
+      retryInterval = "2m"
+    }
+  }
+
   depends_on = [module.eks_blueprints_addons_karpenter]
 }
