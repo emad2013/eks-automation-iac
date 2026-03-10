@@ -42,7 +42,7 @@ data "aws_iam_role" "karpenter_controller" {
 # Fix: use aws_iam_roles (plural) with regex to find the actual role name
 # eks_blueprints_addons may name it differently depending on version
 data "aws_iam_roles" "karpenter" {
-  name_regex = ".*karpenter.*"
+  name_regex = "^karpenter-${module.eks.cluster_name}-.*"
   depends_on = [module.eks_blueprints_addons_karpenter]
 }
 
