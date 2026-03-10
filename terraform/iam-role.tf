@@ -86,8 +86,6 @@ resource "aws_iam_role_policy" "karpenter_pass_role" {
   depends_on = [module.eks_blueprints_addons_karpenter]
 }
 
-data "aws_caller_identity" "current" {}
-
 # Needed to resolve account ID for ARN construction
 data "aws_caller_identity" "current" {}
 
