@@ -1,12 +1,12 @@
 provider "aws" {
   region = var.aws_region
 }
-
+# Added alias to access karpenter repo in us-east-1
 provider "aws" {
   alias  = "virginia"
   region = "us-east-1"
 }
-
+#-----------------Helm access to cluster----------------------
 provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
@@ -20,11 +20,11 @@ provider "helm" {
 }
 
 data "aws_availability_zones" "azs" {}
-
+# Passing token to us-east-1 for karpenter ecr
 data "aws_ecrpublic_authorization_token" "token" {
   provider = aws.virginia
 }
-
+#----------------VPC module to create VPC, subnets, networking stack,ALB, natgateway for egres traffic from worker nodes--------------------- 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 6.6.0"
@@ -49,7 +49,7 @@ module "vpc" {
 
   tags = var.tags
 }
-
+#---------------------------EKS modue to install and setup eks cluster auto policy assingment and dependencies.-------------------
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
@@ -62,7 +62,7 @@ module "eks" {
   subnet_ids = module.vpc.private_subnets
 
   enable_cluster_creator_admin_permissions = true
-
+#--------- Deprecated aws-configmap to map users IAM OIDC , latest providers access_entries allow mapping roles from IAM to kubenetes"
   access_entries = {
     external_admin = {
       principal_arn     = aws_iam_role.external-admin.arn
@@ -89,7 +89,7 @@ module "eks" {
       }
     }
   }
-
+#------------AWS native CNI pod networking-----------------------------------------
   addons = {
     vpc-cni = {
       before_compute = true
@@ -97,7 +97,7 @@ module "eks" {
     kube-proxy = {}
     coredns    = {}
   }
-
+#----------------- Worker Node groups-------------------------
   eks_managed_node_groups = {
     initial = {
       instance_types = ["t3.medium"]
@@ -111,6 +111,7 @@ module "eks" {
 }
 
 # Stage 1: LBC + metrics-server only
+# EKS community based bluprint addons module to implements addons
 module "eks_blueprints_addons" {
   source  = "aws-ia/eks-blueprints-addons/aws"
   version = "~> 1.0"
@@ -142,6 +143,7 @@ module "eks_blueprints_addons" {
 }
 
 # Stage 2: Wait for LBC webhook to be ready
+#--------------Avoid race condition during setup for aws load balancer endpoints------------------------
 resource "null_resource" "wait_for_lbc" {
   provisioner "local-exec" {
     command     = <<-EOT
@@ -168,7 +170,7 @@ module "eks_blueprints_addons_karpenter" {
   enable_karpenter                           = true
   karpenter_enable_spot_termination          = true
   karpenter_enable_instance_profile_creation = true
-
+# karpenter version to deploy from addon on repo.
   karpenter = {
     repository_username = data.aws_ecrpublic_authorization_token.token.user_name
     repository_password = data.aws_ecrpublic_authorization_token.token.password
@@ -179,6 +181,7 @@ module "eks_blueprints_addons_karpenter" {
   tags       = var.tags
 }
 
+#----------------Karpenter role to trigger nodes during node autoscaling---------------------------------
 resource "aws_eks_access_entry" "karpenter_nodes" {
   cluster_name  = module.eks.cluster_name
   principal_arn = module.eks_blueprints_addons_karpenter.karpenter.node_iam_role_arn
@@ -204,7 +207,7 @@ provider "flux" {
     }
   }
 }
-
+#---------------- Flux boottrap to integrate with  eks--------------------------------------
 resource "flux_bootstrap_git" "this" {
   path               = "clusters/dev/${var.name}"
   embedded_manifests = true
