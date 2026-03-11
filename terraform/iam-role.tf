@@ -1,7 +1,7 @@
 # iam_role.tf
 
 # ──────────────────────────────────────────────
-# Admin Role
+# Admin Role sts Assume for IAM
 # ──────────────────────────────────────────────
 resource "aws_iam_role" "external-admin" {
   name = "external-admin"
@@ -38,7 +38,7 @@ resource "aws_iam_role_policy" "external-admin-policy" {
 }
 
 # ──────────────────────────────────────────────
-# Developer Role
+# Developer Role sts Assume for IAM
 # ──────────────────────────────────────────────
 resource "aws_iam_role" "external-developer" {
   name = "external-developer"
