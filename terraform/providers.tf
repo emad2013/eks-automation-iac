@@ -1,3 +1,4 @@
+##  Providers that require to implement EKS Cluster and dependencies based on usecase.
 terraform {
   required_providers {
     aws = {
