@@ -1,3 +1,5 @@
+## Access  EKS to implements namespace, roles, rolesbinding, clusterrole and clusterrolebinding
+
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
@@ -56,6 +58,7 @@ resource "kubernetes_role_binding_v1" "namespace-viewer" {
 
   depends_on = [kubernetes_role_v1.namespace-viewer]
 }
+
 
 resource "kubernetes_cluster_role_v1" "cluster_viewer" {
   metadata {
