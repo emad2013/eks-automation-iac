@@ -18,12 +18,9 @@ provider "helm" {
     }
   }
 }
-
+# List AZs
 data "aws_availability_zones" "azs" {}
-# Passing token to us-east-1 for karpenter ecr
-data "aws_ecrpublic_authorization_token" "token" {
-  provider = aws.virginia
-}
+
 #----------------VPC module to create VPC, subnets, networking stack,ALB, natgateway for egres traffic from worker nodes--------------------- 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
@@ -204,16 +201,15 @@ module "eks_blueprints_addons_karpenter" {
   karpenter_enable_instance_profile_creation = true
 # karpenter version to deploy from addon on repo.
   karpenter = {
-    repository_username = data.aws_ecrpublic_authorization_token.token.user_name
-    repository_password = data.aws_ecrpublic_authorization_token.token.password
-    chart_version       = "0.37.0"
+    chart_version = "1.0.8"
+    repository    = "oci://public.ecr.aws/karpenter"
   }
 
   depends_on = [null_resource.wait_for_lbc]
   tags       = var.tags
 }
 
-#----------------Karpenter role to trigger nodes during node autoscaling---------------------------------
+#----------------Karpenter Node Access entry role to trigger nodes during node autoscaling---------------------------------
 resource "aws_eks_access_entry" "karpenter_nodes" {
   cluster_name  = module.eks.cluster_name
   principal_arn = module.eks_blueprints_addons_karpenter.karpenter.node_iam_role_arn
