@@ -64,6 +64,15 @@ module "eks" {
   enable_cluster_creator_admin_permissions = true
 #--------- Deprecated aws-configmap to map users IAM OIDC , latest providers access_entries allow mapping roles from IAM to kubenetes"
   access_entries = {
+    cluster_creator = {
+      principal_arn = "arn:aws:iam::850317988271:user/emad"
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }  
     external_admin = {
       principal_arn     = aws_iam_role.external-admin.arn
       kubernetes_groups = ["none"]
@@ -89,25 +98,6 @@ module "eks" {
       }
     }
   }
-
-#--------------IAM policy EBS Version 6.0 ----------------------------------------------------
-module "ebs_csi_irsa" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "~> 6.0"
-
-  name                  = "ebs-csi"
-  attach_ebs_csi_policy = true
-
-  oidc_providers = {
-    this = {
-      provider_arn               = module.eks.oidc_provider_arn
-      namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
-    }
-  }
-
-  tags = var.tags
-}
-
 #------------ EKS Addons — includes EBS CSI Driver with IRSA-----------------------
  addons = {
     aws-ebs-csi-driver = {
@@ -135,7 +125,23 @@ module "ebs_csi_irsa" {
 
   tags = var.tags
 }
+#--------------IAM policy EBS Version 6.0 ----------------------------------------------------
+module "ebs_csi_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
+  version = "~> 6.0"
 
+  name                  = "${var.name}-ebs-csi"
+  attach_ebs_csi_policy = true
+
+  oidc_providers = {
+    this = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
+    }
+  }
+
+  tags = var.tags
+}  
 #-------------------- Stage 1: LBC + metrics-server only--------------------------------
 # EKS community based bluprint addons module to implements addons
 module "eks_blueprints_addons" {
