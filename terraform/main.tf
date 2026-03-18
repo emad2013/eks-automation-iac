@@ -1,11 +1,7 @@
 provider "aws" {
   region = var.aws_region
 }
-# Added alias to access karpenter repo in us-east-1
-provider "aws" {
-  alias  = "virginia"
-  region = "us-east-1"
-}
+
 #-----------------Helm access to cluster----------------------
 provider "helm" {
   kubernetes {
@@ -201,7 +197,7 @@ module "eks_blueprints_addons_karpenter" {
   karpenter_enable_instance_profile_creation = true
 # karpenter version to deploy from addon on repo.
   karpenter = {
-    chart_version = "1.0.8"
+    chart_version = "1.2.1"
     repository    = "oci://public.ecr.aws/karpenter"
   }
 
@@ -216,7 +212,12 @@ resource "aws_eks_access_entry" "karpenter_nodes" {
   type          = "EC2_LINUX"
   depends_on    = [module.eks_blueprints_addons_karpenter]
 }
-
+#
+resource "aws_ec2_tag" "cluster_sg_karpenter" {
+  resource_id = module.eks.cluster_primary_security_group_id
+  key         = "karpenter.sh/discovery"
+  value       = var.name
+}
 provider "flux" {
   kubernetes = {
     host                   = module.eks.cluster_endpoint
