@@ -89,13 +89,39 @@ module "eks" {
       }
     }
   }
+
+#--------------IAM policy EBS Version 6.0 ----------------------------------------------------
+module "ebs_csi_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
+  version = "~> 6.0"
+
+  name                  = "ebs-csi"
+  attach_ebs_csi_policy = true
+
+  oidc_providers = {
+    this = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
+    }
+  }
+
+  tags = var.tags
+}
+
+#------------ EKS Addons — includes EBS CSI Driver with IRSA-----------------------
+ addons = {
+    aws-ebs-csi-driver = {
+      most_recent              = true
+      service_account_role_arn = module.ebs_csi_irsa.arn
+    }
 #------------AWS native CNI pod networking-----------------------------------------
-  addons = {
+     
     vpc-cni = {
       before_compute = true
     }
     kube-proxy = {}
     coredns    = {}
+
   }
 #----------------- Worker Node groups-------------------------
   eks_managed_node_groups = {
@@ -110,7 +136,7 @@ module "eks" {
   tags = var.tags
 }
 
-# Stage 1: LBC + metrics-server only
+#-------------------- Stage 1: LBC + metrics-server only--------------------------------
 # EKS community based bluprint addons module to implements addons
 module "eks_blueprints_addons" {
   source  = "aws-ia/eks-blueprints-addons/aws"
