@@ -1,7 +1,15 @@
 provider "aws" {
   region = var.aws_region
 }
+# Add at top of main.tf
+provider "aws" {
+  alias  = "virginia"
+  region = "us-east-1"
+}
 
+data "aws_ecrpublic_authorization_token" "token" {
+  provider = aws.virginia
+}
 #-----------------Helm access to cluster----------------------
 provider "helm" {
   kubernetes {
@@ -179,7 +187,11 @@ resource "null_resource" "wait_for_lbc" {
   }
   depends_on = [module.eks_blueprints_addons]
 }
-
+#----------------- ADDING service linked role for Spot Instances-----------------------"
+resource "aws_iam_service_linked_role" "ec2_spot" {
+  aws_service_name = "spot.amazonaws.com"
+  description      = "Service-linked role required for EC2 Spot Instances"
+}
 # Stage 3: Karpenter after LBC webhook is healthy
 module "eks_blueprints_addons_karpenter" {
   source  = "aws-ia/eks-blueprints-addons/aws"
@@ -199,9 +211,11 @@ module "eks_blueprints_addons_karpenter" {
   karpenter = {
     chart_version = "1.2.1"
     repository    = "oci://public.ecr.aws/karpenter"
+    repository_username = data.aws_ecrpublic_authorization_token.token.user_name
+    repository_password = data.aws_ecrpublic_authorization_token.token.password
   }
 
-  depends_on = [null_resource.wait_for_lbc]
+  depends_on = [null_resource.wait_for_lbc, aws_iam_service_linked_role.ec2_spot]
   tags       = var.tags
 }
 
@@ -211,6 +225,21 @@ resource "aws_eks_access_entry" "karpenter_nodes" {
   principal_arn = module.eks_blueprints_addons_karpenter.karpenter.node_iam_role_arn
   type          = "EC2_LINUX"
   depends_on    = [module.eks_blueprints_addons_karpenter]
+}
+resource "aws_iam_role_policy" "karpenter_passrole" {
+  name = "KarpenterPassRole"
+  role = split("/", module.eks_blueprints_addons_karpenter.karpenter.iam_role_arn)[1]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "iam:PassRole"
+        Resource = module.eks_blueprints_addons_karpenter.karpenter.node_iam_role_arn
+      }
+    ]
+  })
 }
 #
 resource "aws_ec2_tag" "cluster_sg_karpenter" {
